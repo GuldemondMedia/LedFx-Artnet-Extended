@@ -25,6 +25,7 @@ hiddenimports = [
     "zeroconf._utils.ipaddress",
     "zeroconf._handlers.answers",
     "stupidArtnet",
+    "ledfx.devices.shehds_galaxyjet",
     "mss",
     "PIL.Image",
     "PIL.ImageDraw",
