@@ -20,8 +20,15 @@ MOVEMENT_MODES = (
     "Sweep",
     "Mirror sweep",
     "Circle",
+    "Infinity (figure 8)",
     "BPM synced sweep",
     "Bar synced circle",
+)
+
+PRISM_MODES = (
+    "Off",
+    "On",
+    "Toggle on beat",
 )
 
 BRIGHTNESS_MODES = (
@@ -296,6 +303,21 @@ class ShehdsGalaxyJetDevice(NetworkedDevice):
                     "Maximum strobe rate for beat/music strobe modes"
                 ),
                 default=50,
+            ): vol.All(int, vol.Range(min=0, max=100)),
+            vol.Optional(
+                "prism_mode",
+                description=(
+                    "Prism behaviour. Toggle on beat alternates the prism "
+                    "in and out using LEDFx beat detection."
+                ),
+                default="Off",
+            ): vol.All(str, vol.In(PRISM_MODES)),
+            vol.Optional(
+                "prism_rotation_speed",
+                description=(
+                    "Prism rotation speed: 0 is stopped, 100 is fastest"
+                ),
+                default=0,
             ): vol.All(int, vol.Range(min=0, max=100)),
             vol.Optional(
                 "zoom",
@@ -591,6 +613,11 @@ class ShehdsGalaxyJetDevice(NetworkedDevice):
         elif mode in ("Circle", "Bar synced circle"):
             pan += math.sin(phase) * pan_range / 2.0
             tilt += math.cos(phase) * tilt_range / 2.0
+        elif mode == "Infinity (figure 8)":
+            # Lissajous 1:2 path: a horizontal figure-eight. This sweeps
+            # both sides of a court instead of orbiting one centre point.
+            pan += math.sin(phase) * pan_range / 2.0
+            tilt += math.sin(phase * 2.0) * tilt_range / 2.0
 
         pan = min(255.0, max(0.0, pan))
         tilt = min(255.0, max(0.0, tilt))
@@ -712,6 +739,25 @@ class ShehdsGalaxyJetDevice(NetworkedDevice):
             )
         )
 
+    def _prism(self, audio):
+        mode = self._config.get("prism_mode", "Off")
+        if mode == "On":
+            prism = 128
+        elif mode == "Toggle on beat":
+            prism = 128 if audio.get("beat_count", 0) % 2 else 0
+        else:
+            prism = 0
+
+        speed = int(self._config.get("prism_rotation_speed", 0))
+        if prism == 0 or speed <= 0:
+            rotation = 191
+        else:
+            # Documented clockwise rotation range is 193-255,
+            # slow to fast. 191-192 is stop.
+            rotation = int(round(193 + (speed / 100.0) * 62))
+
+        return prism, rotation
+
     def activate(self):
         if self._destination is None:
             super().activate()
@@ -808,6 +854,7 @@ class ShehdsGalaxyJetDevice(NetworkedDevice):
                 )
                 gobo = self._gobo(fixture_index, audio, now)
                 shutter = self._shutter(audio, now)
+                prism, prism_rotation = self._prism(audio)
 
                 focus_coarse, focus_fine = self._coarse_fine(
                     self._config.get("focus", 128)
@@ -828,8 +875,8 @@ class ShehdsGalaxyJetDevice(NetworkedDevice):
                         gobo,                          # CH11 Gobo 1
                         0,                             # CH12 Gobo 2 open
                         0,                             # CH13 Gobo 2 rotation
-                        0,                             # CH14 Prism off
-                        191,                           # CH15 Prism rotation stop
+                        prism,                         # CH14 Prism
+                        prism_rotation,                # CH15 Prism rotation
                         0,                             # CH16 Frost off
                         self._config.get("zoom", 128), # CH17 Zoom
                         focus_coarse,                  # CH18 Focus
